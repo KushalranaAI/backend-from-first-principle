@@ -1,0 +1,213 @@
+import type { Scene } from "../types";
+
+/** Lesson 04, Serialization. */
+export const scenes: Scene[] = [
+  {
+    type: "boxes",
+    after: "text-formats-and-binary-formats",
+    title: "One bookmark encoded twice: JSON text, Protocol Buffers bytes",
+    boxes: ["JSON, as sent", "Protocol Buffers, as sent", ".proto schema (not sent)"],
+    frames: [
+      {
+        items: [[], [], ["int64 id = 1", "string url = 2", "repeated string tags = 3"]],
+        hot: ["int64 id = 1", "string url = 2", "repeated string tags = 3"],
+        label: "one bookmark, two encodings",
+        note: "Both ends of a Protocol Buffers link already hold the schema. JSON has none, so every message must describe itself.",
+      },
+      {
+        items: [["{\"id\":42,"], ["08 2A"], ["int64 id = 1", "string url = 2", "repeated string tags = 3"]],
+        hot: ["{\"id\":42,", "08 2A", "int64 id = 1"],
+        label: "id: 9 bytes of text, 2 bytes of binary",
+        note: "JSON spells out the name and the digits. Protocol Buffers sends one byte meaning “field 1, a number” and one byte holding 42.",
+      },
+      {
+        items: [
+          ["{\"id\":42,", "\"url\":\"https://nodejs.org\","],
+          ["08 2A", "12 12 https://nodejs.org"],
+          ["int64 id = 1", "string url = 2", "repeated string tags = 3"],
+        ],
+        hot: ["\"url\":\"https://nodejs.org\",", "12 12 https://nodejs.org", "string url = 2"],
+        label: "url: 27 bytes against 20",
+        note: "The address costs the same 18 bytes in both. Protocol Buffers swaps the name and the quotes for a field number and a length.",
+      },
+      {
+        items: [
+          ["{\"id\":42,", "\"url\":\"https://nodejs.org\",", "\"tags\":[\"node\",\"docs\"]}"],
+          ["08 2A", "12 12 https://nodejs.org", "1A 04 node", "1A 04 docs"],
+          ["int64 id = 1", "string url = 2", "repeated string tags = 3"],
+        ],
+        hot: ["\"tags\":[\"node\",\"docs\"]}", "1A 04 node", "1A 04 docs", "repeated string tags = 3"],
+        label: "tags: 23 bytes against 12",
+        note: "A repeated field is the same field number sent once per item, each with its own length. No brackets or commas are needed.",
+      },
+      {
+        items: [
+          ["{\"id\":42,", "\"url\":\"https://nodejs.org\",", "\"tags\":[\"node\",\"docs\"]}"],
+          ["08 2A", "12 12 https://nodejs.org", "1A 04 node", "1A 04 docs"],
+          ["int64 id = 1", "string url = 2", "repeated string tags = 3"],
+        ],
+        hot: ["08 2A", "12 12 https://nodejs.org", "1A 04 node", "1A 04 docs"],
+        label: "59 bytes against 34",
+        note: "The saving is the field names. The price is that these bytes mean nothing to a person, or to a program that lacks the schema.",
+      },
+    ],
+  },
+  {
+    type: "boxes",
+    after: "json-pitfalls-in-javascript",
+    title: "A bigint id crossing JSON into JavaScript",
+    boxes: ["Id in Postgres (bigint)", "JSON text on the wire", "After JSON.parse"],
+    frames: [
+      {
+        items: [["9007199254740991"], [], []],
+        hot: ["9007199254740991"],
+        label: "id = 2^53 − 1, the last safe integer",
+        note: "Postgres stores a bigint exactly. The question is what happens to it on the way to a JavaScript client.",
+      },
+      {
+        items: [["9007199254740991"], ["{\"id\":9007199254740991}"], []],
+        hot: ["{\"id\":9007199254740991}"],
+        label: "on the wire: digits as text",
+        note: "JSON writes a number as its digits and puts no limit on how many there are.",
+      },
+      {
+        items: [["9007199254740991"], ["{\"id\":9007199254740991}"], ["9007199254740991"]],
+        hot: ["9007199254740991"],
+        label: "parsed: still exact",
+        note: "JSON.parse turns every number into a 64-bit float, which has 53 bits for the digits. This value just fits.",
+        kind: "res",
+      },
+      {
+        items: [["9007199254740993"], ["{\"id\":9007199254740993}"], []],
+        hot: ["9007199254740993", "{\"id\":9007199254740993}"],
+        label: "two ids later: 9007199254740993",
+        note: "The database and the text on the wire are both still exact. Nothing has gone wrong yet.",
+      },
+      {
+        items: [["9007199254740993"], ["{\"id\":9007199254740993}"], ["9007199254740992"]],
+        hot: ["9007199254740992"],
+        label: "parsed: the last digit changed",
+        note: "Past 2^53 a float can only hold every second integer. JSON.parse picks the nearest one and reports no error, so the client now asks for the wrong bookmark.",
+        kind: "err",
+      },
+      {
+        items: [["9007199254740993"], ["{\"id\":\"9007199254740993\"}"], []],
+        hot: ["{\"id\":\"9007199254740993\"}"],
+        label: "the fix: send the id as a string",
+        note: "Two extra quote characters tell every parser to leave the digits alone.",
+      },
+      {
+        items: [["9007199254740993"], ["{\"id\":\"9007199254740993\"}"], ["\"9007199254740993\""]],
+        hot: ["\"9007199254740993\""],
+        label: "parsed: a string, every digit kept",
+        note: "A string is never rounded. Ids are compared and passed around, never added up, so nothing is lost by not having a number.",
+        kind: "res",
+      },
+    ],
+  },
+  {
+    type: "boxes",
+    after: "serialize-at-the-boundary-explicitly",
+    title: "Plain JSON.stringify against toBookmarkResponse, field by field",
+    boxes: ["Bookmark in memory", "Plain JSON.stringify", "toBookmarkResponse"],
+    frames: [
+      {
+        items: [["id: 42n", "title: undefined", "tags: Set(2)", "createdAt: Date"], [], []],
+        label: "one bookmark, as the server holds it",
+        note: "In memory the fields have real types: a BigInt, a Set, a Date and a title that isn't known yet.",
+      },
+      {
+        items: [["id: 42n", "title: undefined", "tags: Set(2)", "createdAt: Date"], ["id → TypeError"], []],
+        hot: ["id: 42n", "id → TypeError"],
+        label: "BigInt: stringify throws",
+        note: "JSON.stringify refuses a BigInt, so no response body is produced at all.",
+        kind: "err",
+      },
+      {
+        items: [["id: 42n", "title: undefined", "tags: Set(2)", "createdAt: Date"], ["id → TypeError", "title → key dropped"], []],
+        hot: ["title: undefined", "title → key dropped"],
+        label: "undefined: the key vanishes",
+        note: "Even with the id left out, the title is lost. The client can't tell “no title yet” from a server that forgot to send the field.",
+        kind: "err",
+      },
+      {
+        items: [
+          ["id: 42n", "title: undefined", "tags: Set(2)", "createdAt: Date"],
+          ["id → TypeError", "title → key dropped", "tags → {}"],
+          [],
+        ],
+        hot: ["tags: Set(2)", "tags → {}"],
+        label: "Set: becomes an empty object",
+        note: "A Set has no enumerable properties of its own, so both tags are lost and nothing warns you.",
+        kind: "err",
+      },
+      {
+        items: [
+          ["id: 42n", "title: undefined", "tags: Set(2)", "createdAt: Date"],
+          ["id → TypeError", "title → key dropped", "tags → {}", "createdAt → ISO string"],
+          [],
+        ],
+        hot: ["createdAt: Date", "createdAt → ISO string"],
+        label: "Date: the one that works",
+        note: "A Date has a toJSON method that writes an ISO 8601 string in UTC. One field out of four came through as intended.",
+      },
+      {
+        items: [
+          ["id: 42n", "title: undefined", "tags: Set(2)", "createdAt: Date"],
+          ["id → TypeError", "title → key dropped", "tags → {}", "createdAt → ISO string"],
+          ["id: \"42\"", "title: null", "tags: [\"node\",\"docs\"]", "createdAt: \"2026-03-01T…Z\""],
+        ],
+        hot: ["id: \"42\"", "title: null", "tags: [\"node\",\"docs\"]", "createdAt: \"2026-03-01T…Z\""],
+        label: "the fix: build the response field by field",
+        note: "One small function converts each type on purpose: BigInt to string, undefined to null, Set to array, Date to ISO text.",
+        kind: "res",
+      },
+      {
+        items: [
+          ["id: 42n", "title: undefined", "tags: Set(2)", "createdAt: Date", "a new column"],
+          ["id → TypeError", "title → key dropped", "tags → {}", "createdAt → ISO string", "a new column → sent"],
+          ["id: \"42\"", "title: null", "tags: [\"node\",\"docs\"]", "createdAt: \"2026-03-01T…Z\""],
+        ],
+        hot: ["a new column", "a new column → sent"],
+        label: "next year: the table gains a column",
+        note: "Plain stringify ships every property it finds, so the new column reaches clients at once. The function sends only the fields it names.",
+        kind: "err",
+      },
+    ],
+  },
+  {
+    type: "flow",
+    after: "schemas-and-evolution",
+    title: "Renaming a field breaks an old reader; adding one doesn't",
+    actors: ["Old app", "API", "New app"],
+    steps: [
+      [0, 1, "GET /api/v1/bookmarks/42", "An app installed last year, and never updated, asks for a bookmark."],
+      [1, 0, "{ \"title\": \"Node docs\" }", "It reads title and shows it.", "res"],
+      [1, 1, "deploy: rename title to name", "The server's code is tidied up. The app on people's phones does not change with it."],
+      [0, 1, "GET /api/v1/bookmarks/42", "The same request as before."],
+      [1, 0, "{ \"name\": \"Node docs\" }", "The old app still looks for title, finds nothing and shows a blank row. No error is raised anywhere.", "err"],
+      [1, 1, "fix: add name, keep title", "Add, never rename. The new field is sent next to the old one."],
+      [0, 1, "GET /api/v1/bookmarks/42", "The old app asks once more."],
+      [1, 0, "{ \"title\": …, \"name\": … }", "It reads title and ignores the field it doesn't know: the tolerant reader rule.", "res"],
+      [1, 2, "{ \"title\": …, \"name\": … }", "A new app gets the same response and reads name. title can go once no old reader is left.", "res"],
+    ],
+  },
+  {
+    type: "flow",
+    after: "build-linkbox-step-4",
+    title: "Four request bodies arrive at readJson",
+    actors: ["Client", "readJson", "Handler"],
+    steps: [
+      [0, 1, "POST with a form-encoded body", "Content-Type says application/x-www-form-urlencoded, not JSON."],
+      [1, 0, "415 unsupported_media_type", "The label is checked first. Nothing is read or parsed in a format the server doesn't speak.", "err"],
+      [0, 1, "POST, Content-Length: 204800", "A 200 KB body, with its size declared in a header."],
+      [1, 0, "413 body_too_large", "Over the 100 KB limit, so it is refused before it is buffered. A body with no declared length is counted as it arrives and cut off at the same limit.", "err"],
+      [0, 1, "POST {\"url\": \"https://nodejs.org\"", "The right type and small enough, but the closing brace is missing."],
+      [1, 1, "JSON.parse throws", "The bytes are not a JSON document. Left alone, this error would turn into a 500."],
+      [1, 0, "400 invalid_json", "readJson catches it and blames the right side: the client sent bad input, the server did not fail.", "err"],
+      [0, 1, "POST {\"url\":\"https://nodejs.org\"}", "A small, well-formed JSON body."],
+      [1, 2, "a parsed value", "All three checks passed. The handler gets a JavaScript value, which still has to be validated (lesson 06)."],
+      [2, 0, "201 Created", "The bookmark is stored and returned in the same envelope as every other response.", "res"],
+    ],
+  },
+];

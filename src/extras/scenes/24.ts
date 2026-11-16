@@ -1,0 +1,155 @@
+import type { Scene } from "../types";
+
+/** Lesson 24, OpenAPI. */
+export const scenes: Scene[] = [
+  {
+    type: "boxes",
+    after: "the-first-principle",
+    title: "Three copies of one fact drift apart",
+    boxes: ["Server code", "Docs page", "Frontend", "openapi.yaml"],
+    frames: [
+      {
+        items: [["notes: string"], ["notes: string"], ["sends notes"], []],
+        label: "POST /api/v1/bookmarks, known in three places",
+        note: "The server, the docs and the frontend each hold their own copy of what a bookmark's body looks like.",
+      },
+      {
+        items: [["note: string"], ["notes: string"], ["sends notes"], []],
+        hot: ["note: string"],
+        label: "someone renames notes to note on the server",
+        note: "A one-line change in one of the three copies. Nothing tells the other two.",
+      },
+      {
+        items: [["note: string"], ["notes: string"], ["sends notes"], []],
+        hot: ["notes: string", "sends notes"],
+        label: "docs and frontend still say notes",
+        note: "The server ignores or rejects the unknown field, and you find out from a bug report.",
+        kind: "err",
+      },
+      {
+        items: [["note: string"], ["notes: string"], ["sends notes"], ["note: string"]],
+        hot: ["note: string"],
+        label: "write the fact once, in a file a program can read",
+        note: "The file is the signature of the remote call. The other copies stop being written by hand.",
+      },
+      {
+        items: [["note: string"], ["note: string"], ["sends notes"], ["note: string"]],
+        hot: ["note: string"],
+        label: "the docs are rendered from the file",
+        note: "A generated page can't disagree with its source.",
+        kind: "res",
+      },
+      {
+        items: [["note: string"], ["note: string"], ["sends note"], ["note: string"]],
+        hot: ["sends note"],
+        label: "client types are generated: notes no longer compiles",
+        note: "The frontend learns about the rename from its compiler, before the change ships, not from a user.",
+        kind: "res",
+      },
+    ],
+  },
+  {
+    type: "boxes",
+    after: "request-bodies-and-responses",
+    title: "Each line of createBookmark describes part of a real exchange",
+    boxes: ["createBookmark in the file", "Request on the wire", "Response on the wire"],
+    frames: [
+      {
+        items: [["post: /bookmarks"], ["POST /api/v1/bookmarks"], []],
+        hot: ["post: /bookmarks", "POST /api/v1/bookmarks"],
+        label: "servers url + path + method",
+        note: "The path in the file is appended to the server URL, so /bookmarks means /api/v1/bookmarks.",
+      },
+      {
+        items: [["post: /bookmarks", "security: session"], ["POST /api/v1/bookmarks", "Cookie: sid=abc"], []],
+        hot: ["security: session", "Cookie: sid=abc"],
+        label: "security: the session cookie",
+        note: "The default security scheme says every operation needs the sid cookie unless it opts out.",
+      },
+      {
+        items: [["post: /bookmarks", "security: session", "header: Idempotency-Key"], ["POST /api/v1/bookmarks", "Cookie: sid=abc", "Idempotency-Key: 7f3a"], []],
+        hot: ["header: Idempotency-Key", "Idempotency-Key: 7f3a"],
+        label: "parameters: a header",
+        note: "A parameter has a name, a location and a schema. This one is in the header and is optional.",
+      },
+      {
+        items: [["post: /bookmarks", "security: session", "header: Idempotency-Key", "requestBody: BookmarkInput"], ["POST /api/v1/bookmarks", "Cookie: sid=abc", "Idempotency-Key: 7f3a", "{\"url\":\"https://a.example\"}"], []],
+        hot: ["requestBody: BookmarkInput", "{\"url\":\"https://a.example\"}"],
+        label: "requestBody: JSON that fits BookmarkInput",
+        note: "The schema says url is required and must be a URI. This body passes.",
+      },
+      {
+        items: [["post: /bookmarks", "security: session", "header: Idempotency-Key", "requestBody: BookmarkInput", "\"201\": Bookmark"], ["POST /api/v1/bookmarks", "Cookie: sid=abc", "Idempotency-Key: 7f3a", "{\"url\":\"https://a.example\"}"], ["201 Created", "Location: .../bookmarks/42", "{\"id\":\"42\",\"url\":...}"]],
+        hot: ["\"201\": Bookmark", "201 Created", "Location: .../bookmarks/42", "{\"id\":\"42\",\"url\":...}"],
+        label: "responses \"201\": headers and a Bookmark",
+        note: "The file promised a Location header and a body shaped like Bookmark, and that is what came back.",
+        kind: "res",
+      },
+      {
+        items: [["post: /bookmarks", "security: session", "header: Idempotency-Key", "requestBody: BookmarkInput", "\"201\": Bookmark", "\"400\": BadRequest"], ["POST /api/v1/bookmarks", "Cookie: sid=abc", "Idempotency-Key: 7f3a", "{\"url\":\"not a url\"}"], ["400 Bad Request", "application/problem+json"]],
+        hot: ["\"400\": BadRequest", "{\"url\":\"not a url\"}", "400 Bad Request", "application/problem+json"],
+        label: "responses \"400\": the documented failure",
+        note: "A client generated from a file that lists only 201 would not know this answer exists. List the errors too.",
+        kind: "err",
+      },
+    ],
+  },
+  {
+    type: "flow",
+    after: "code-first-and-design-first",
+    title: "Which side is written first decides what CI must check",
+    actors: ["openapi.yaml", "Backend", "Frontend", "CI"],
+    steps: [
+      [1, 1, "code-first: write the route and its schema", "The server code is the source of truth. Nobody writes the file by hand."],
+      [1, 0, "generate the file from the routes", "A plugin such as @fastify/swagger reads the route schemas, so the file is never stale."],
+      [0, 2, "frontend starts from the generated file", "The frontend could not begin until the handler existed."],
+      [1, 0, "a refactor renames notes to note", "The file follows the code. The contract changed without anyone deciding to change it.", "err"],
+      [3, 1, "breaking-change diff against main fails", "Code-first is generated, so the check it needs guards the contract's shape.", "res"],
+      [0, 0, "design-first: edit openapi.yaml in a pull request", "Now the file is the source of truth, and the change is reviewed before any code exists."],
+      [0, 2, "mock server from the file", "The frontend builds against the mock on day one."],
+      [0, 1, "write the handler to match", "The backend works at the same time, against the same file."],
+      [3, 1, "Schemathesis: running server against the file", "Design-first risks drift, so its check tests the real server against the file.", "res"],
+    ],
+  },
+  {
+    type: "boxes",
+    after: "the-design-first-pipeline-lint-mock-generate-test",
+    title: "What a breaking-change diff lets through",
+    boxes: ["openapi.yaml on main", "On your branch", "Diff in CI"],
+    frames: [
+      {
+        items: [["Bookmark.title", "Bookmark.tags", "input: url required", "input: title optional"], ["Bookmark.title", "Bookmark.tags", "input: url required", "input: title optional"], []],
+        label: "the branch equals main",
+        note: "Clients in use today were written against what main says. The diff asks whether they would still work.",
+      },
+      {
+        items: [["Bookmark.title", "Bookmark.tags", "input: url required", "input: title optional"], ["Bookmark.title", "Bookmark.tags", "input: url required", "input: title optional", "Bookmark.description"], ["new response field: ok"]],
+        hot: ["Bookmark.description", "new response field: ok"],
+        label: "add description to the response",
+        note: "Not breaking: an existing client ignores a field it doesn't know about.",
+        kind: "res",
+      },
+      {
+        items: [["Bookmark.title", "Bookmark.tags", "input: url required", "input: title optional"], ["Bookmark.name", "Bookmark.tags", "input: url required", "input: title optional", "Bookmark.description"], ["new response field: ok", "Bookmark.title removed"]],
+        hot: ["Bookmark.name", "Bookmark.title removed"],
+        label: "rename title to name in the response",
+        note: "Breaking: a rename is a removal plus an addition, and every client that reads title now gets nothing.",
+        kind: "err",
+      },
+      {
+        items: [["Bookmark.title", "Bookmark.tags", "input: url required", "input: title optional"], ["Bookmark.name", "Bookmark.tags", "input: url required", "input: title required", "Bookmark.description"], ["new response field: ok", "Bookmark.title removed", "title became required"]],
+        hot: ["input: title required", "title became required"],
+        label: "make title required in the request",
+        note: "Breaking: a request that was valid yesterday is now a 400. Tightening an input breaks callers.",
+        kind: "err",
+      },
+      {
+        items: [["Bookmark.title", "Bookmark.tags", "input: url required", "input: title optional"], ["Bookmark.title", "Bookmark.tags", "input: url required", "input: title optional", "Bookmark.description"], ["new response field: ok"]],
+        hot: ["Bookmark.title", "input: title optional"],
+        label: "undo both: CI passes",
+        note: "The additive change ships now. A rename or a new required field waits for a new version of the API.",
+        kind: "res",
+      },
+    ],
+  },
+];

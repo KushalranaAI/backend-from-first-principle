@@ -1,0 +1,132 @@
+import type { Scene } from "../types";
+
+/** Lesson 23, The twelve-factor app. */
+export const scenes: Scene[] = [
+  {
+    type: "boxes",
+    after: "v-build-release-run",
+    title: "One build becomes several releases",
+    boxes: ["Build", "Config", "Releases"],
+    frames: [
+      {
+        items: [["image ab12"], ["staging vars", "production vars"], []],
+        label: "one commit, built once",
+        note: "The build stage turns a commit into one image. Config is kept apart from it, one set of variables per deploy.",
+      },
+      {
+        items: [["image ab12"], ["staging vars", "production vars"], ["staging v42"]],
+        hot: ["image ab12", "staging vars", "staging v42"],
+        label: "image ab12 + staging vars = staging v42",
+        note: "A release is a build combined with one deploy's config. It gets an id and is never edited afterwards.",
+        kind: "res",
+      },
+      {
+        items: [["image ab12"], ["staging vars", "production vars"], ["staging v42", "production v42"]],
+        hot: ["image ab12", "production vars", "production v42"],
+        label: "the same image + production vars",
+        note: "Production runs the exact image that staging tested. Only the variables differ, so nothing new can go wrong in a rebuild.",
+        kind: "res",
+      },
+      {
+        items: [["image ab12"], ["staging vars", "production vars", "new REDIS_URL"], ["staging v42", "production v42", "production v43"]],
+        hot: ["new REDIS_URL", "production v43"],
+        label: "change one variable: production v43",
+        note: "A config change makes a new release, but the image is still ab12. Nothing is rebuilt.",
+      },
+      {
+        items: [["image ab12"], ["staging vars", "production vars", "new REDIS_URL"], ["staging v42", "production v42", "production v43", "edit on server, no id"]],
+        hot: ["edit on server, no id"],
+        label: "someone fixes a bug by editing a file on the server",
+        note: "The edit is in no build and no release. The next deploy drops it without a word, and nobody can roll back to it.",
+        kind: "err",
+      },
+      {
+        items: [["image ab12", "image cd34"], ["staging vars", "production vars", "new REDIS_URL"], ["staging v42", "production v42", "production v43", "production v44"]],
+        hot: ["image cd34", "production v44"],
+        label: "commit the fix: image cd34, production v44",
+        note: "Changes only flow forward: commit, build, release, run. Now the fix has an id and v43 is still there to go back to.",
+        kind: "res",
+      },
+    ],
+  },
+  {
+    type: "flow",
+    after: "vi-processes-stateless-and-share-nothing",
+    title: "A session that survives its process being replaced",
+    actors: ["Client", "Load balancer", "web.1", "web.2", "Postgres"],
+    steps: [
+      [0, 2, "POST /api/v1/auth/login", "The load balancer could have picked any web process. This time it picked web.1."],
+      [2, 2, "sessions.set(sid, user) in memory", "The naive version keeps the session in a Map inside this one process.", "err"],
+      [2, 0, "200, Set-Cookie: sid=abc", "The client now holds a session id that only web.1 knows about."],
+      [1, 3, "GET /api/v1/bookmarks, Cookie: sid=abc", "The next request lands on web.2. The same happens if a deploy replaces web.1."],
+      [3, 0, "401 Unauthorized", "web.2 has never seen this session, so the user is logged out for no reason.", "err"],
+      [2, 4, "INSERT INTO sessions", "The fix: at login the process writes the session to a backing service and keeps nothing itself."],
+      [2, 2, "SIGTERM: web.1 exits", "A deploy replaces web.1. Nothing is lost, because it held nothing."],
+      [1, 3, "GET /api/v1/bookmarks, Cookie: sid=abc", "The same request as before reaches web.2."],
+      [3, 4, "SELECT ... FROM sessions WHERE id = 'abc'", "web.2 finds the session in the place every process shares."],
+      [3, 0, "200 OK", "Any process can answer any request, so the platform is free to move, restart and multiply them.", "res"],
+    ],
+  },
+  {
+    type: "boxes",
+    after: "viii-concurrency-scale-out-with-processes",
+    title: "Each process type scales on its own signal",
+    boxes: ["web processes", "worker processes", "Queue"],
+    frames: [
+      {
+        items: [["web.1", "web.2", "web.3"], ["worker.1", "worker.2"], ["fetch title 1"]],
+        label: "formation: web ×3, worker ×2",
+        note: "Web processes answer HTTP. Workers take jobs from the queue. Both run from the same release.",
+      },
+      {
+        items: [["web.1", "web.2", "web.3"], ["worker.1", "worker.2"], ["fetch title 1", "fetch title 2", "fetch title 3", "fetch title 4", "fetch title 5"]],
+        hot: ["fetch title 2", "fetch title 3", "fetch title 4", "fetch title 5"],
+        label: "many bookmarks saved at once: the queue grows",
+        note: "Every new bookmark needs its page fetched. Two workers can't keep up, so jobs wait.",
+      },
+      {
+        items: [["web.1", "web.2", "web.3", "web.4", "web.5"], ["worker.1", "worker.2"], ["fetch title 1", "fetch title 2", "fetch title 3", "fetch title 4", "fetch title 5"]],
+        hot: ["web.4", "web.5"],
+        label: "scale web to 5: the queue stays as deep",
+        note: "Web processes never touch the queue. Making the whole app bigger pays for capacity in the wrong place.",
+        kind: "err",
+      },
+      {
+        items: [["web.1", "web.2", "web.3"], ["worker.1", "worker.2", "worker.3", "worker.4"], ["fetch title 4", "fetch title 5"]],
+        hot: ["worker.3", "worker.4"],
+        label: "web ×3, worker ×4: the queue drains",
+        note: "Queue depth is the signal for workers, so only the worker count changes.",
+        kind: "res",
+      },
+      {
+        items: [["web.1", "web.2", "web.3"], ["worker.1", "worker.2"], []],
+        label: "queue empty: back to worker ×2",
+        note: "Removing workers is safe because each one is disposable: it finishes or returns its job before it exits.",
+        kind: "res",
+      },
+      {
+        items: [["web.1", "web.2", "web.3", "web.4", "web.5"], ["worker.1", "worker.2"], []],
+        hot: ["web.4", "web.5"],
+        label: "a traffic spike: web ×5, worker ×2",
+        note: "Now request load is the signal, so only web grows. The formation is two numbers you set independently.",
+      },
+    ],
+  },
+  {
+    type: "flow",
+    after: "the-real-formation-web-worker-one-off-migration",
+    title: "Migrating in every web process, then as a one-off",
+    actors: ["Deploy", "web.1", "web.2", "migrate", "Postgres"],
+    steps: [
+      [0, 1, "start v42", "The naive version: every web process runs pending migrations when it boots."],
+      [0, 2, "start v42 (same moment)", "A second copy of the same release starts beside it."],
+      [1, 4, "ALTER TABLE bookmarks ADD COLUMN ...", "web.1 sees one pending migration and begins it."],
+      [2, 4, "the same ALTER TABLE", "web.2 saw the same pending migration, so it runs it too.", "err"],
+      [4, 2, "ERROR: column already exists", "One process loses the race and crashes on boot, and its health check fails.", "err"],
+      [0, 3, "node scripts/migrate.js", "The fix: one short-lived process, from the same release and config, runs before any web process starts."],
+      [3, 4, "pg_advisory_lock, then migrate", "The lock is a second guard: a second run would wait instead of overlapping."],
+      [3, 0, "exit 0", "The deploy continues only if the migration succeeded. A failure stops it here.", "res"],
+      [0, 1, "start web ×3 and worker ×2", "The processes boot fast, because migrating is no longer in their boot path.", "res"],
+    ],
+  },
+];

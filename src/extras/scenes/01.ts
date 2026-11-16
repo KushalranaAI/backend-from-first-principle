@@ -1,0 +1,143 @@
+import type { Scene } from "../types";
+
+/** Lesson 01, What is a backend. */
+export const scenes: Scene[] = [
+  {
+    type: "boxes",
+    after: "the-first-principle",
+    title: "A like saved on one laptop, then on a server",
+    boxes: ["Your laptop", "Your friend's phone", "Server"],
+    frames: [
+      {
+        items: [["post"], ["post"], []],
+        label: "no backend: two separate copies",
+        note: "Without a backend, each device keeps its own copy of the data and nothing connects them.",
+      },
+      {
+        items: [["post", "your like"], ["post"], []],
+        hot: ["your like"],
+        label: "you like the post",
+        note: "The like is saved on your laptop, because there is nowhere else to save it.",
+      },
+      {
+        items: [["post", "your like"], ["post", "0 likes"], []],
+        hot: ["0 likes"],
+        label: "your friend opens the app",
+        note: "Their phone has never heard of your like. Nothing carried it from one device to the other.",
+        kind: "err",
+      },
+      {
+        items: [["post"], ["post", "0 likes"], []],
+        label: "your browser's storage is cleared",
+        note: "Data kept on one device disappears with it. There was never a second copy.",
+        kind: "err",
+      },
+      {
+        items: [[], [], ["post"]],
+        hot: ["post"],
+        label: "with a backend: one shared copy",
+        note: "Now the post lives on a machine that is always on and that every device can reach.",
+      },
+      {
+        items: [[], [], ["post", "your like"]],
+        hot: ["your like"],
+        label: "your laptop sends the like to the server",
+        note: "The laptop doesn't keep the like. It asks the server to store it, and the server decides whether that is allowed.",
+      },
+      {
+        items: [["post", "your like"], ["post", "your like"], ["post", "your like"]],
+        hot: ["your like"],
+        label: "both devices ask the server",
+        note: "Every device reads from the same place, so your friend sees the like, and so does your own phone.",
+        kind: "res",
+      },
+    ],
+  },
+  {
+    type: "flow",
+    after: "the-trip-of-one-request",
+    title: "Each step of the trip fails in its own way",
+    actors: ["curl", "DNS", "Reverse proxy", "App"],
+    steps: [
+      [0, 1, "where is linkbox.exmple?", "A typo in the name. DNS is the first step, so it is the first thing that can fail."],
+      [1, 0, "could not resolve host", "No address came back, so curl never tried to connect to anything.", "err"],
+      [0, 2, "TCP connect to 203.0.113.10:443", "With the name spelled right, DNS answers. Now curl knocks on port 443."],
+      [2, 0, "connection refused", "The machine exists, but no process is listening on that port. The proxy isn't running.", "err"],
+      [0, 2, "TLS handshake", "With the proxy started, the port opens. Before any HTTP, the proxy must prove it owns the name."],
+      [2, 0, "certificate has expired", "curl stops here. No HTTP request was sent, so the app's logs show nothing at all.", "err"],
+      [0, 2, "GET /api/v1/bookmarks", "With a renewed certificate, the request finally goes out."],
+      [2, 3, "forward to localhost:3000", "The proxy passes it to the app's private port."],
+      [3, 2, "no answer", "The Node process has crashed, so nobody is listening on port 3000.", "err"],
+      [2, 0, "502 Bad Gateway", "The proxy answers for the app it couldn't reach. Only now is it time to read the app's logs.", "err"],
+    ],
+  },
+  {
+    type: "boxes",
+    after: "why-we-need-a-backend",
+    title: "One like, five jobs",
+    boxes: ["API", "Database", "Job queue", "Author's phone"],
+    frames: [
+      {
+        items: [["like post 9"], ["post 9: 7 likes"], [], []],
+        hot: ["like post 9"],
+        label: "a like arrives",
+        note: "One tap on a heart reaches the backend as a single request.",
+      },
+      {
+        items: [["like post 9", "may you like it? yes"], ["post 9: 7 likes"], [], []],
+        hot: ["may you like it? yes"],
+        label: "1. enforce the rule",
+        note: "The server checks that you are logged in and allowed to see this post. It doesn't take your phone's word for it.",
+      },
+      {
+        items: [["like post 9", "may you like it? yes"], ["post 9: 7 likes", "like: you → post 9"], [], []],
+        hot: ["like: you → post 9"],
+        label: "2. store the like",
+        note: "It is saved in the shared database, so it exists for every user and every device.",
+      },
+      {
+        items: [["like post 9", "may you like it? yes"], ["post 9: 8 likes", "like: you → post 9"], [], []],
+        hot: ["post 9: 8 likes"],
+        label: "3. bump the counter",
+        note: "The count that everyone sees is updated in the same place.",
+      },
+      {
+        items: [["like post 9", "may you like it? yes"], ["post 9: 8 likes", "like: you → post 9"], ["notify the author"], []],
+        hot: ["notify the author"],
+        label: "4. queue a notification",
+        note: "Telling the author can wait a moment, so it becomes a job for later instead of slowing down your tap.",
+      },
+      {
+        items: [[], ["post 9: 8 likes", "like: you → post 9"], ["notify the author"], []],
+        label: "respond: liked",
+        note: "You get your answer now. The work that is left doesn't need your app to stay open.",
+        kind: "res",
+      },
+      {
+        items: [[], ["post 9: 8 likes", "like: you → post 9"], [], ["“New like on your post”"]],
+        hot: ["“New like on your post”"],
+        label: "5. a worker pushes it to the author",
+        note: "A background process picks up the job. This is the always-on machine doing work no browser tab is waiting for.",
+        kind: "res",
+      },
+    ],
+  },
+  {
+    type: "flow",
+    after: "why-backend-logic-cant-live-in-the-frontend",
+    title: "A rule checked only in the browser is skipped with curl",
+    actors: ["Web page", "curl", "API", "Database"],
+    steps: [
+      [0, 0, "Delete button disabled", "Bookmark 42 belongs to someone else, so the page greys out its Delete button."],
+      [1, 2, "DELETE /api/v1/bookmarks/42", "The user ignores the page and sends the request by hand. The button's code never runs.", "err"],
+      [2, 3, "DELETE … WHERE id = 42", "This API assumed the page had already checked, so it deletes whatever it is asked to.", "err"],
+      [2, 1, "deleted", "Another person's bookmark is gone. The check in the browser protected nothing.", "err"],
+      [2, 2, "fix: check the owner on the server", "The rule moves to the one place the user can't edit."],
+      [1, 2, "DELETE /api/v1/bookmarks/42", "The same request, sent the same way."],
+      [2, 3, "who owns bookmark 42?", "Before changing anything, the API looks up the owner and compares it with the logged-in user."],
+      [3, 2, "someone else", "The database answers, and the two don't match.", "res"],
+      [2, 1, "refused", "The request is turned down however it was sent: from the page, from curl or from a script.", "res"],
+      [0, 0, "the button stays disabled", "The page still hides the button, but only to save honest users a wasted click.", "res"],
+    ],
+  },
+];

@@ -1,0 +1,176 @@
+import type { Scene } from "../types";
+
+/** Lesson 10, Caching. */
+export const scenes: Scene[] = [
+  {
+    type: "flow",
+    after: "http-caching-let-the-client-do-the-work",
+    title: "A conditional request: the body travels once",
+    actors: ["Browser", "Linkbox API", "Postgres"],
+    steps: [
+      [0, 1, "GET /api/v1/bookmarks/7", "The first request. The browser has no copy yet."],
+      [1, 2, "select … where id = 7", "The server loads the bookmark."],
+      [1, 0, "200 + ETag: \"abc123\" + body", "The full JSON, with a version tag. The browser stores both.", "res"],
+      [0, 1, "GET … If-None-Match: \"abc123\"", "Later the browser asks again and says which version it already holds."],
+      [1, 2, "select … where id = 7", "The server still does the lookup: it must know the current version to compare."],
+      [1, 0, "304 Not Modified, no body", "The tags match, so only headers travel, and the browser shows its stored copy.", "res"],
+      [0, 1, "GET … If-None-Match: \"abc123\"", "Someone has edited the bookmark since. The browser doesn't know and sends the old tag."],
+      [1, 0, "200 + ETag: \"def456\" + new body", "The tag no longer matches, so the server sends the new version with its new tag.", "res"],
+    ],
+  },
+  {
+    type: "boxes",
+    after: "caching-strategies",
+    title: "Write-behind: what is lost if the cache dies before a flush",
+    boxes: ["Cache (Redis)", "Not yet in Postgres", "Postgres"],
+    frames: [
+      {
+        items: [["views:7 = 1"], ["1 view"], ["views = 0"]],
+        hot: ["views:7 = 1", "1 view"],
+        label: "INCR views:7",
+        note: "The write is done as soon as Redis has it. Postgres has not heard about it.",
+      },
+      {
+        items: [["views:7 = 3"], ["3 views"], ["views = 0"]],
+        hot: ["views:7 = 3", "3 views"],
+        label: "two more views",
+        note: "Writes stay fast because none of them waits for the database.",
+      },
+      {
+        items: [["views:7 = 3"], [], ["views = 3"]],
+        hot: ["views = 3"],
+        label: "flush: update bookmarks set views = 3",
+        note: "Every few seconds one batch goes to Postgres in a single statement. Now both stores agree.",
+        kind: "res",
+      },
+      {
+        items: [["views:7 = 5"], ["2 views"], ["views = 3"]],
+        hot: ["views:7 = 5", "2 views"],
+        label: "two more views arrive",
+        note: "For a while the cache is the only place that knows the true number.",
+      },
+      {
+        items: [[], [], ["views = 3"]],
+        hot: ["views = 3"],
+        label: "the cache loses its data before the next flush",
+        note: "Those two views existed only in the cache. They are gone, and nothing can rebuild them.",
+        kind: "err",
+      },
+      {
+        items: [["views:7 = 4"], [], ["views = 4"]],
+        hot: ["views:7 = 4", "views = 4"],
+        label: "write-through: every write goes to both",
+        note: "Each write is slower because it waits for Postgres, but there is never an unsaved pile to lose.",
+        kind: "res",
+      },
+    ],
+  },
+  {
+    type: "boxes",
+    after: "eviction",
+    title: "allkeys-lru: which key leaves when memory is full",
+    boxes: ["Redis, least recently used first", "Evicted"],
+    frames: [
+      {
+        items: [["tagcounts:42", "bookmark:42:1", "bookmark:42:2", "bookmark:42:3"], []],
+        label: "maxmemory reached",
+        note: "Redis counts bytes, not keys; four keys are simply what fits in this picture. The next write needs space.",
+      },
+      {
+        items: [["bookmark:42:1", "bookmark:42:2", "bookmark:42:3", "tagcounts:42"], []],
+        hot: ["tagcounts:42"],
+        label: "GET tagcounts:42",
+        note: "A read counts as a use, so this key moves to the safe end of the line.",
+        kind: "res",
+      },
+      {
+        items: [["bookmark:42:2", "bookmark:42:3", "tagcounts:42", "bookmark:42:4"], ["bookmark:42:1"]],
+        hot: ["bookmark:42:4", "bookmark:42:1"],
+        label: "SET bookmark:42:4 → evicts bookmark:42:1",
+        note: "The key unused for longest is deleted to make room. Redis samples a few keys to pick it, so its choice is close to this, not always identical.",
+      },
+      {
+        items: [
+          ["bookmark:42:5", "bookmark:42:6", "bookmark:42:7", "bookmark:42:8"],
+          ["bookmark:42:1", "bookmark:42:2", "bookmark:42:3", "bookmark:42:4", "tagcounts:42"],
+        ],
+        hot: ["tagcounts:42"],
+        label: "an import writes four keys in a row",
+        note: "LRU only knows how recently a key was used. A burst of one-off keys pushes out the key that is read all day.",
+        kind: "err",
+      },
+      {
+        items: [
+          ["tagcounts:42", "bookmark:42:6", "bookmark:42:7", "bookmark:42:8"],
+          ["bookmark:42:1", "bookmark:42:2", "bookmark:42:3", "bookmark:42:4", "bookmark:42:5"],
+        ],
+        hot: ["tagcounts:42"],
+        label: "the same burst under allkeys-lfu",
+        note: "LFU counts how often a key is used, so the burst evicts keys that were read once and keeps the one that is read constantly.",
+        kind: "res",
+      },
+    ],
+  },
+  {
+    type: "flow",
+    after: "invalidation",
+    title: "Two writers: why the rule is delete, not set",
+    actors: ["Writer A", "Writer B", "Postgres", "Redis"],
+    steps: [
+      [0, 2, "UPDATE … SET title = 'A'", "Two requests edit bookmark 7 at almost the same moment. A's update commits first."],
+      [1, 2, "UPDATE … SET title = 'B'", "B's update commits second, so the database ends up holding B."],
+      [1, 3, "SET bookmark:42:7 'B'", "The wrong way: each writer copies its value into the cache. B happens to get there first."],
+      [0, 3, "SET bookmark:42:7 'A'", "A's cache write arrives late and overwrites B. The cache says A, the database says B, until the TTL runs out.", "err"],
+      [0, 3, "DEL bookmark:42:7", "The right way: after its commit, each writer deletes the key."],
+      [1, 3, "DEL bookmark:42:7", "Deletes in either order leave the same thing: no key. There is no stale value that can win."],
+      [0, 3, "GET bookmark:42:7 → nil", "The next read, from any request, misses."],
+      [0, 2, "SELECT … → title 'B'", "It loads whatever the database holds now and caches that.", "res"],
+    ],
+  },
+  {
+    type: "boxes",
+    after: "stampedes",
+    title: "A hot key expires: 500 queries, or one",
+    boxes: ["Redis", "Requests that missed", "inflight map", "Queries in Postgres"],
+    frames: [
+      {
+        items: [["tagcounts:42"], [], [], []],
+        hot: ["tagcounts:42"],
+        label: "GET tagcounts:42 → hit, hit, hit",
+        note: "While the key exists, every request is answered from Redis and Postgres does nothing.",
+        kind: "res",
+      },
+      {
+        items: [[], [], [], []],
+        label: "the TTL runs out",
+        note: "Redis deletes the key on schedule. Nothing is wrong yet.",
+      },
+      {
+        items: [[], ["req 1", "req 2", "req 3", "… 500 in 50 ms"], [], ["query 1", "query 2", "query 3", "… 500 the same"]],
+        hot: ["query 1", "query 2", "query 3", "… 500 the same"],
+        label: "every request misses and runs the query",
+        note: "All of them start the same group by before the first one has finished and refilled the cache.",
+        kind: "err",
+      },
+      {
+        items: [[], ["req 1"], ["tagcounts:42 → promise"], ["query 1"]],
+        hot: ["tagcounts:42 → promise"],
+        label: "coalesce: the first miss starts the load",
+        note: "With the fix, the first request stores the promise of the result in a Map, under the cache key.",
+      },
+      {
+        items: [[], ["req 1", "req 2", "req 3", "… 500 in 50 ms"], ["tagcounts:42 → promise"], ["query 1"]],
+        hot: ["req 2", "req 3", "… 500 in 50 ms"],
+        label: "later misses find the promise and await it",
+        note: "No second query starts. Everyone waits for the same answer.",
+      },
+      {
+        items: [["tagcounts:42"], [], [], []],
+        hot: ["tagcounts:42"],
+        label: "one query, 500 answers, key refilled",
+        note: "The Map lives in one process. Across several instances you add a short Redis lock, SET … NX PX.",
+        kind: "res",
+      },
+    ],
+  },
+];

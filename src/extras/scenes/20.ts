@@ -1,0 +1,206 @@
+import type { Scene } from "../types";
+
+/** Lesson 20, Object storage and large files. */
+export const scenes: Scene[] = [
+  {
+    type: "boxes",
+    after: "folders-are-an-illusion",
+    title: "How LIST turns flat keys into folders",
+    boxes: ["Keys in the bucket, sorted", "Contents", "CommonPrefixes"],
+    frames: [
+      {
+        items: [
+          ["users/42/attachments/a.pdf", "users/42/attachments/b.pdf", "users/42/avatar.png", "users/42/exports/nov.zip", "users/7/avatar.png"],
+          [],
+          [],
+        ],
+        label: "one bucket, one sorted list of keys",
+        note: "There are no directories in here. Each key is a single string that happens to contain slashes.",
+      },
+      {
+        items: [
+          ["users/42/attachments/a.pdf", "users/42/attachments/b.pdf", "users/42/avatar.png", "users/42/exports/nov.zip", "users/7/avatar.png"],
+          [],
+          [],
+        ],
+        hot: ["users/42/attachments/a.pdf", "users/42/attachments/b.pdf", "users/42/avatar.png", "users/42/exports/nov.zip"],
+        label: "LIST Prefix=\"users/42/\" Delimiter=\"/\"",
+        note: "The store scans the sorted keys that start with the prefix. users/7/avatar.png does not, so it is skipped.",
+      },
+      {
+        items: [
+          ["users/42/attachments/a.pdf", "users/42/attachments/b.pdf", "users/42/avatar.png", "users/42/exports/nov.zip", "users/7/avatar.png"],
+          ["users/42/avatar.png"],
+          [],
+        ],
+        hot: ["users/42/avatar.png"],
+        label: "no slash after the prefix: a plain result",
+        note: "What is left of this key after the prefix is avatar.png, with no delimiter in it, so it is returned as an object.",
+        kind: "res",
+      },
+      {
+        items: [
+          ["users/42/attachments/a.pdf", "users/42/attachments/b.pdf", "users/42/avatar.png", "users/42/exports/nov.zip", "users/7/avatar.png"],
+          ["users/42/avatar.png"],
+          ["users/42/attachments/"],
+        ],
+        hot: ["users/42/attachments/a.pdf", "users/42/attachments/b.pdf", "users/42/attachments/"],
+        label: "another slash after the prefix: grouped",
+        note: "Both keys have a further slash, so they collapse into one common prefix. A console draws that prefix as a folder.",
+        kind: "res",
+      },
+      {
+        items: [
+          ["users/42/attachments/a.pdf", "users/42/attachments/b.pdf", "users/42/avatar.png", "users/42/exports/nov.zip", "users/7/avatar.png"],
+          ["users/42/avatar.png"],
+          ["users/42/attachments/", "users/42/exports/"],
+        ],
+        hot: ["users/42/exports/nov.zip", "users/42/exports/"],
+        label: "one key is enough to make a folder",
+        note: "The exports folder appears because a single key carries that prefix. Nothing else stores it.",
+        kind: "res",
+      },
+      {
+        items: [
+          ["users/42/attachments/a.pdf", "users/42/attachments/b.pdf", "users/42/avatar.png", "users/7/avatar.png"],
+          ["users/42/avatar.png"],
+          ["users/42/attachments/"],
+        ],
+        hot: ["users/42/attachments/"],
+        label: "DELETE nov.zip, then LIST again",
+        note: "The last key under exports/ is gone, and the folder went with it. An empty folder cannot exist, because a folder was only ever a shared prefix.",
+      },
+    ],
+  },
+  {
+    type: "boxes",
+    after: "durability-replication-erasure-coding-and-eleven-nines",
+    title: "Erasure coding 10 + 4 loses disks and keeps the file",
+    boxes: ["Data shards 1 to 5", "Data shards 6 to 10", "Parity shards", "A GET returns"],
+    frames: [
+      {
+        items: [["D1", "D2", "D3", "D4", "D5"], ["D6", "D7", "D8", "D9", "D10"], [], []],
+        label: "PUT a.pdf: cut into 10 data shards",
+        note: "The store cuts the object into ten equal pieces. So far a single lost disk would lose part of the file.",
+      },
+      {
+        items: [["D1", "D2", "D3", "D4", "D5"], ["D6", "D7", "D8", "D9", "D10"], ["P1", "P2", "P3", "P4"], []],
+        hot: ["P1", "P2", "P3", "P4"],
+        label: "compute 4 parity shards",
+        note: "Four extra shards are calculated from the ten. All 14 go on different disks, which costs 1.4 times the file's size.",
+      },
+      {
+        items: [["D1", "D2", "D3 lost", "D4", "D5"], ["D6", "D7", "D8", "D9", "D10"], ["P1", "P2", "P3", "P4"], []],
+        hot: ["D3 lost"],
+        label: "the disk holding D3 fails",
+        note: "A piece of the original data is gone. Thirteen shards are left, and any ten are enough.",
+        kind: "err",
+      },
+      {
+        items: [["D1", "D2", "D3 lost", "D4", "D5"], ["D6", "D7", "D8", "D9", "D10"], ["P1", "P2", "P3", "P4"], ["a.pdf, complete"]],
+        hot: ["P1", "a.pdf, complete"],
+        label: "GET a.pdf: 9 data shards + P1",
+        note: "The store reads nine data shards and one parity shard and calculates D3 from them. The price is CPU and one extra read.",
+        kind: "res",
+      },
+      {
+        items: [["D1", "D2", "D3 lost", "D4", "D5"], ["D6", "D7 lost", "D8", "D9", "D10"], ["P1", "P2 lost", "P3", "P4 lost"], ["a.pdf, complete"]],
+        hot: ["D7 lost", "P2 lost", "P4 lost"],
+        label: "three more disks fail: D7, P2, P4",
+        note: "Four shards are lost and exactly ten remain, a mix of data and parity. It does not matter which ten: the file still comes back whole.",
+        kind: "res",
+      },
+      {
+        items: [["D1", "D2", "D3 lost", "D4", "D5"], ["D6", "D7 lost", "D8", "D9", "D10 lost"], ["P1", "P2 lost", "P3", "P4 lost"], ["nothing: 9 shards left"]],
+        hot: ["D10 lost", "nothing: 9 shards left"],
+        label: "a fifth failure: D10",
+        note: "Nine shards are too few, and now the file is lost. This is why a store rebuilds a missing shard onto a healthy disk soon after each failure.",
+        kind: "err",
+      },
+    ],
+  },
+  {
+    type: "flow",
+    after: "conditional-writes-if-none-match-and-if-match",
+    title: "Two workers race to create the same key",
+    actors: ["Worker A", "Object store", "Worker B"],
+    steps: [
+      [0, 1, "PUT locks/nightly-export", "Worker A claims tonight's export by writing a lock object with a plain PUT."],
+      [2, 1, "PUT locks/nightly-export", "Worker B starts at the same moment and writes the same key."],
+      [1, 0, "200 OK", "A's write is accepted.", "res"],
+      [1, 2, "200 OK", "So is B's. A plain PUT is last writer wins: both workers believe they hold the lock, and the export runs twice.", "err"],
+      [0, 1, "PUT … If-None-Match: *", "The next night, with the old lock deleted, both workers add one header: create this key only if it does not exist."],
+      [2, 1, "PUT … If-None-Match: *", "B's request arrives while A's is still in flight."],
+      [1, 0, "200 OK", "A's write finishes first, so the key is created and A holds the lock.", "res"],
+      [1, 2, "412 Precondition Failed", "The key exists now, so the store refuses B's write instead of silently replacing A's.", "err"],
+      [2, 2, "return: another worker has it", "B knows it lost the race and skips the work. One export runs, and no separate database was needed to decide.", "res"],
+    ],
+  },
+  {
+    type: "boxes",
+    after: "multipart-upload-the-three-calls-and-a-fourth",
+    title: "A multipart upload where one part fails",
+    boxes: ["Waiting", "In flight", "Stored parts", "Visible in LIST"],
+    frames: [
+      {
+        items: [["part 1", "part 2", "part 3", "part 4", "part 5"], [], [], []],
+        label: "CreateMultipartUpload → UploadId",
+        note: "The store hands back an UploadId. A file cut into five parts is ready to go, and no object exists yet.",
+      },
+      {
+        items: [["part 4", "part 5"], ["part 1", "part 2", "part 3"], [], []],
+        hot: ["part 1", "part 2", "part 3"],
+        label: "UploadPart 1, 2 and 3 at once",
+        note: "Each part is its own request on its own connection, so three travel in parallel.",
+      },
+      {
+        items: [[], ["part 2", "part 4", "part 5"], ["part 1", "part 3"], []],
+        hot: ["part 1", "part 3"],
+        label: "parts 1 and 3 answer with an ETag",
+        note: "Parts finish in any order. The store keeps each one under the UploadId, and the next parts start.",
+        kind: "res",
+      },
+      {
+        items: [[], ["part 2", "part 4", "part 5"], ["part 1", "part 3"], []],
+        hot: ["part 2"],
+        label: "part 2: the connection drops",
+        note: "Only this request failed. The parts already stored and the other parts in flight are untouched.",
+        kind: "err",
+      },
+      {
+        items: [[], ["part 2", "part 5"], ["part 1", "part 3", "part 4"], []],
+        hot: ["part 2"],
+        label: "retry part 2 alone",
+        note: "The same part number is sent again. A failure costs one part's worth of upload, not the whole file.",
+      },
+      {
+        items: [[], [], ["part 1", "part 3", "part 4", "part 5", "part 2"], []],
+        hot: ["part 5", "part 2"],
+        label: "all five stored, and GET still says 404",
+        note: "Every byte has arrived, but there is still no object: nothing shows in LIST until the upload is completed.",
+      },
+      {
+        items: [[], [], [], ["users/42/attachments/0b9e"]],
+        hot: ["users/42/attachments/0b9e"],
+        label: "CompleteMultipartUpload(parts 1 to 5 + ETags)",
+        note: "The store joins the parts in part-number order and commits once. The object appears whole, never half built.",
+        kind: "res",
+      },
+    ],
+  },
+  {
+    type: "flow",
+    after: "range-requests-206-content-range-and-416",
+    title: "Fetching the middle of a video with Range",
+    actors: ["Video player", "Object store"],
+    steps: [
+      [0, 1, "GET /videos/42.mp4, Range: bytes=0-1048575", "The player asks for the first 1,048,576 bytes only. Both ends of a range are inclusive."],
+      [1, 0, "206, Content-Range: bytes 0-1048575/734003200", "206 means a slice, not the whole file. The number after the slash is the total size.", "res"],
+      [0, 0, "the user drags the slider to the middle", "From the index at the start of the file, the player works out which byte holds that moment."],
+      [0, 1, "Range: bytes=367001600-368050175", "It asks for 1 MiB starting half way in. None of the 350 MiB before it is downloaded."],
+      [1, 0, "206, bytes 367001600-368050175/734003200", "The store sends that slice and nothing else. Content-Range says where it sits in the file.", "res"],
+      [0, 1, "Range: bytes=800000000-", "A client with a stale idea of the file asks for bytes past the end."],
+      [1, 0, "416, Content-Range: bytes */734003200", "Range Not Satisfiable. The header still carries the real size, so the client can correct itself.", "err"],
+    ],
+  },
+];
