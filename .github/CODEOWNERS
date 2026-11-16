@@ -1,0 +1,7 @@
+# Every change needs the owner's review; pull requests request it automatically.
+*                      @KushalranaAI
+/.github/              @KushalranaAI
+/SECURITY.md           @KushalranaAI
+/server/               @KushalranaAI
+/src/ai/               @KushalranaAI
+/vite.config.ts        @KushalranaAI
